@@ -7,6 +7,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+
+app_old
+api_in_mem
+
+
 backend
 node_modules
 dist

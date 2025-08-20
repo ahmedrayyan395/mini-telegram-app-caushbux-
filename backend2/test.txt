@@ -1,0 +1,82 @@
+# In your Flask app.py or a new auth_routes.py blueprint
+
+# You will need to install Flask-Session
+# pip install Flask-Session
+# And configure it in your app factory
+from flask import session
+from flask_session import Session # Import the extension
+
+# In your app factory (create_app function)
+# app.config['SESSION_TYPE'] = 'filesystem' # Or redis, etc.
+# app.config['SECRET_KEY'] = 'your-very-secret-key-for-sessions'
+# Session(app)
+
+
+# IMPORTANT: This function needs to be updated to use sessions
+def current_user():
+    if 'user_id' in session:
+        return User.query.get(session['user_id'])
+    return None # No user is logged in
+
+
+# NEW ENDPOINT: /auth/telegram
+@app.post('/auth/telegram')
+def auth_with_telegram():
+    data = request.get_json()
+    init_data_str = data.get('initData')
+
+    if not init_data_str:
+        return jsonify({"error": "initData is required"}), 400
+
+    # !!! CRITICAL SECURITY STEP: You MUST validate the hash here !!!
+    # This is a simplified example. A full implementation requires crypto libraries.
+    # See Telegram documentation for hash validation.
+    # If validation fails: return jsonify({"error": "Invalid hash"}), 403
+
+    # Parse the initData string
+    params = dict(p.split('=') for p in init_data_str.split('&'))
+    user_data = json.loads(params.get('user', '{}'))
+    
+    telegram_id = user_data.get('id')
+    if not telegram_id:
+        return jsonify({"error": "Invalid user data in initData"}), 400
+
+    # Find or create the user
+    user = User.query.filter_by(telegram_id=telegram_id).first()
+    if not user:
+        user = User(
+            telegram_id=telegram_id,
+            username=user_data.get('username'),
+            first_name=user_data.get('first_name'),
+            last_name=user_data.get('last_name'),
+            language=user_data.get('language_code'),
+            last_login=datetime.now()
+        )
+        db.session.add(user)
+    else:
+        # Update user details if they have changed
+        user.username = user_data.get('username')
+        user.first_name = user_data.get('first_name')
+        user.last_name = user_data.get('last_name')
+        user.last_login = datetime.now()
+
+    db.session.commit()
+
+    # Store the user's ID in the session to log them in
+    session['user_id'] = user.id
+
+    # Return the user's data (you should create a to_dict method on your User model)
+    return jsonify(user.to_dict()) # Assuming you have a to_dict method
+
+
+# NEW ENDPOINT for the updated fetchUser
+@app.get('/user/me')
+def get_current_user():
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    return jsonify(user.to_dict()) # Return the logged-in user's data
+
+
+# OLD ENDPOINT: /user can be removed or repurposed
+# @app.get('/user') -> This should be removed or changed to @app.get('/user/me')```

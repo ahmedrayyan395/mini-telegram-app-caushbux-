@@ -3,15 +3,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { Buffer } from 'buffer';
 
-// Import types and the API functions
 import type { User } from './types';
-import { loginWithTelegram, adminLogout } from './services/api';
+import { fetchUser } from './services/api';
 
-// Import Layouts and Components
 import Layout from './components/Layout';
-import ProtectedRoute from './components/admin/ProtectedRoute';
-
-// Import User Pages
 import EarningsPage from './pages/EarningsPage';
 import QuestsPage from './pages/QuestsPage';
 import FriendsPage from './pages/FriendsPage';
@@ -23,136 +18,55 @@ import SpinWheelPage from './pages/SpinWheelPage';
 import SpaceDefenderPage from './pages/SpaceDefenderPage';
 import StreetRacingPage from './pages/StreetRacingPage';
 
-// Import Admin Pages
+// Admin Imports
 import LoginPage from './pages/admin/LoginPage';
 import AdminLayout from './pages/admin/AdminLayout';
+import ProtectedRoute from './components/admin/ProtectedRoute';
 import DashboardPage from './pages/admin/DashboardPage';
 import UsersPage from './pages/admin/UsersPage';
 import PromoCodesPage from './pages/admin/PromoCodesPage';
 import TasksPage from './pages/admin/TasksPage';
 import SettingsPage from './pages/admin/SettingsPage';
 
-/**
- * Extend the global Window interface to include the Telegram WebApp object.
- * This is necessary for TypeScript to recognize window.Telegram.
- */
+
+// Extend the Window interface to include Buffer for polyfill
 declare global {
   interface Window {
     Buffer: typeof Buffer;
-    Telegram: {
-      WebApp: {
-        initData: string;
-        ready: () => void;
-        expand: () => void;
-        // You can add other Telegram WebApp properties here if you use them
-      }
-    }
   }
 }
 
-// A required polyfill for the @tonconnect/ui-react library to work correctly.
+// Buffer polyfill for @tonconnect/ui-react
 window.Buffer = Buffer;
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
 
+
   useEffect(() => {
-    /**
-     * This is the core authentication logic for the Telegram Mini App.
-     */
-    const authenticateUser = async () => {
-      try {
-        // The initData string is the user's credential provided by Telegram.
-        const initData = window.Telegram?.WebApp?.initData;
-        
-        // console.log(initData)
-
-        
-
-        if (!initData) {
-          
-          // This error will be shown if the app is opened in a regular browser.
-          throw new Error("Not running inside Telegram. Authentication is not possible.");
-        }
-        
-        // Send the credential to the backend to get a session and user data.
-        const authenticatedUser = await loginWithTelegram(initData);
-        setUser(authenticatedUser);
-
-      } catch (err: any) {
-        console.error("Authentication failed:", err);
-        setError(err.data?.message || err.message || "An error occurred during authentication.");
-      } finally {
-        // Once authentication is attempted (successfully or not), stop loading.
-        setLoading(false);
-      }
-    };
-
-    // We must wait for the Telegram environment to be fully initialized.
-    // The `window.Telegram.WebApp.ready()` function ensures that all Telegram-specific
-    // objects, including `initData`, are available before we try to use them.
-    if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.ready();
-        window.Telegram.WebApp.expand(); // Expands the Mini App to full height
-        authenticateUser();
-    } else {
-        // This handles the case where the Telegram script itself fails to load.
-        setError("Telegram Web App script not found. Please run the app inside Telegram.");
-        setLoading(false);
-    }
-
-    // Also, check for an existing admin token in localStorage on initial load.
+    fetchUser().then(setUser);
+    // Check for existing admin token in localStorage
     if (localStorage.getItem('admin_token')) {
         setIsAdminAuthenticated(true);
     }
-  }, []); // The empty dependency array ensures this effect runs only once on app startup.
+  }, []);
   
 
 
-
-
-
-  
-  /**
-   * A handler to update the user state, passed as a prop to child components.
-   * This allows children to refresh the user's data (e.g., after claiming a reward).
-   */
   const handleSetUser = (update: React.SetStateAction<User | null>) => {
     setUser(update);
   };
   
-  /**
-   * Sets the admin authentication state to true after a successful login.
-   */
   const handleAdminLogin = () => {
       setIsAdminAuthenticated(true);
   };
   
-  /**
-   * Logs out the admin by removing the token and updating the state.
-   */
   const handleAdminLogout = () => {
-      adminLogout(); // This function should remove the token from localStorage
+      localStorage.removeItem('admin_token');
       setIsAdminAuthenticated(false);
   };
 
-
-  // -- Render States --
-
-  // Show a loading message while authenticating the user.
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white">Authenticating...</div>;
-  }
-
-  // If an error occurred during authentication, display it to the user.
-  if (error) {
-    return <div className="flex items-center justify-center min-h-screen bg-slate-900 text-red-500 p-4 text-center">{error}</div>;
-  }
-
-  // -- Main Application Routes --
   return (
     <TonConnectUIProvider manifestUrl="https://ton-connect.github.io/demo-dapp-with-react-ui/tonconnect-manifest.json">
         <div className="min-h-screen bg-slate-900 text-white font-sans">
@@ -160,7 +74,13 @@ const App: React.FC = () => {
                {/* Admin Routes */}
                 <Route path="/admin/login" element={<LoginPage onLogin={handleAdminLogin} />} />
 
-                <Route path="/admin" element={ <ProtectedRoute isAuthenticated={isAdminAuthenticated} /> }>
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute isAuthenticated={isAdminAuthenticated} />
+                  }
+
+                >
                   <Route element={<AdminLayout onLogout={handleAdminLogout} />}>
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="users" element={<UsersPage />} />
@@ -171,15 +91,14 @@ const App: React.FC = () => {
                   </Route>
                 </Route>
 
+
                 {/* User Routes */}
-                {/* Standalone pages without the main layout/navbar */}
                 <Route path="/new-task" element={<NewTaskPage user={user} setUser={handleSetUser} />} />
                 <Route path="/new-partner-task" element={<NewPartnerTaskPage user={user} setUser={handleSetUser} />} />
                 <Route path="/spin-wheel" element={<SpinWheelPage user={user} setUser={handleSetUser} />} />
                 <Route path="/game/space-defender" element={<SpaceDefenderPage user={user} setUser={setUser} />} />
                 <Route path="/game/street-racing" element={<StreetRacingPage user={user} setUser={setUser} />} />
 
-                {/* Main user pages with the shared Layout (navbar, etc.) */}
                 <Route element={<Layout user={user} />}>
                     <Route path="/" element={<EarningsPage setUser={handleSetUser} />} />
                     <Route path="/quests" element={<QuestsPage />} />
@@ -194,3 +113,18 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

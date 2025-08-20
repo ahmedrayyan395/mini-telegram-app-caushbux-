@@ -1,429 +1,288 @@
 import type { User, DailyTask, GameTask, Quest, Transaction, Friend, UserCampaign, PartnerCampaign, PromoCode, AdNetwork, AdminUser, Task } from '../types';
-import { INITIAL_USER, DAILY_TASKS, GAME_TASKS, QUESTS, TRANSACTIONS, CONVERSION_RATE, MOCK_FRIENDS, MOCK_USER_CAMPAIGNS, MOCK_PROMO_CODES, SPIN_WHEEL_PRIZES, SPIN_STORE_PACKAGES, MOCK_ADMINS, generateMockUsers, ICONS } from '../constants';
+// We still need some constants for UI or initial state, but not the mock data arrays.
+import { INITIAL_USER, ICONS } from '../constants';
+
+// The base URL of your running Flask backend
+const API_BASE_URL = 'https://c4ab75dd5ccf.ngrok-free.app';
+
+// --- API Helper Functions ---
+
+/**
+ * In a real application, this ID would come from your authentication state
+ * (e.g., stored in React Context or a state management library after login).
+ * For now, it defaults to 1 to match the backend's default user.
+ */
+const getCurrentUserId = (): number => 1;
+
+/**
+ * Retrieves the stored admin authentication token from localStorage.
+ */
+const getAdminToken = (): string | null => {
+    try {
+        return localStorage.getItem('admin_token');
+    } catch (e) {
+        console.error("Could not access localStorage.", e);
+        return null;
+    }
+};
+
+/**
+ * A centralized fetch wrapper to handle API requests, headers, and errors.
+ * @param endpoint The API endpoint to call (e.g., '/user').
+ * @param options The standard RequestInit options for fetch.
+ */
 
 
-// In-memory store
-let users: User[] = [ { ...INITIAL_USER }, ...generateMockUsers(50) ];
-let dailyTasks: DailyTask[] = [...DAILY_TASKS];
-let gameTasks: UserCampaign[] = [...MOCK_USER_CAMPAIGNS].filter(c => c.category === 'Game');
-let socialTasks: UserCampaign[] = [...MOCK_USER_CAMPAIGNS].filter(c => c.category === 'Social');
-let partnerCampaigns: PartnerCampaign[] = [];
-let quests: Quest[] = [...QUESTS];
-let transactions: Transaction[] = [...TRANSACTIONS];
-let userCampaigns: UserCampaign[] = [...MOCK_USER_CAMPAIGNS];
-let promoCodes: PromoCode[] = [...MOCK_PROMO_CODES];
-let admins: AdminUser[] = [...MOCK_ADMINS];
-let settings = {
-    autoWithdrawals: false,
-    adNetworks: [
-        { id: 'libtl', name: 'libtl.com', code: `<script src='//libtl.com/sdk.js' data-zone='9692552' data-sdk='show_9692552'></script>`, enabled: true },
-    ] as AdNetwork[]
+
+// --- NEW Authentication Function ---
+
+/**
+ * Authenticates the user with the backend using the initData string from the Telegram Web App.
+ * @param telegramInitData The raw initData string from window.Telegram.WebApp.initData
+ * @returns The user object from the backend.
+ */
+export const loginWithTelegram = async (telegramInitData: string): Promise<User> => {
+    const user = await apiFetch('/auth/telegram', {
+        method: 'POST',
+        // We don't need other headers here as this is the initial login.
+        body: JSON.stringify({ initData: telegramInitData }),
+    });
+    // This function will now return the full user object, so we can use it directly.
+    return {
+      ...user,
+      spaceDefenderProgress: user.spaceDefenderProgress || INITIAL_USER.spaceDefenderProgress,
+      streetRacingProgress: user.streetRacingProgress || INITIAL_USER.streetRacingProgress,
+    };
 };
 
 
-const simulateDelay = (delay = 500) => new Promise(resolve => setTimeout(resolve, delay));
+
+
+const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+    const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        // 'X-User-Id': String(getCurrentUserId()), // Identify the user for the backend
+        ...options.headers,
+    };
+
+    const adminToken = getAdminToken();
+    if (adminToken) {
+        headers['Authorization'] = `Bearer ${adminToken}`;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            ...options,
+            headers,
+            credentials: 'include',
+        });
+
+        if (!response.ok) {
+            // Try to parse error details from the response body
+            const errorData = await response.json().catch(() => ({ message: response.statusText }));
+            throw { status: response.status, data: errorData };
+        }
+        
+        // Handle responses that don't have a body (e.g., HTTP 204)
+        if (response.status === 204) {
+            return null;
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error(`API Error on ${endpoint}:`, error);
+        // Re-throw the error so UI components can handle it (e.g., show a notification)
+        throw error;
+    }
+};
 
 
 // --- User-facing API ---
 
 export const fetchUser = async (): Promise<User> => {
-  await simulateDelay();
-  
-  const user = users[0];
-  if (!user.spaceDefenderProgress) {
-    user.spaceDefenderProgress = { ...INITIAL_USER.spaceDefenderProgress };
-  }
-  if (!user.streetRacingProgress) {
-    user.streetRacingProgress = { ...INITIAL_USER.streetRacingProgress };
-  }
-  return { ...user };
+  const user = await apiFetch('/user/me'); // Changed to a new endpoint like '/user/me'
+  return {
+      ...user,
+      spaceDefenderProgress: user.spaceDefenderProgress || INITIAL_USER.spaceDefenderProgress,
+      streetRacingProgress: user.streetRacingProgress || INITIAL_USER.streetRacingProgress,
+  };
 };
 
 export const fetchDailyTasks = async (): Promise<DailyTask[]> => {
-  await simulateDelay();
-  return [...dailyTasks];
+  return apiFetch('/daily-tasks');
 };
 
 export const fetchGameTasks = async (): Promise<GameTask[]> => {
-  await simulateDelay();
-  // This is now mapped from the userCampaigns store for consistency
-  return gameTasks.map(c => ({
-      id: c.id,
-      icon: ICONS.game,
-      title: 'Play ' + (new URL(c.link).hostname),
-      reward: (c.cost / (c.goal || 1)) * 0.4 * CONVERSION_RATE,
-  }));
+  // The backend formats this response to match the mock's lightweight structure
+  return apiFetch('/game-tasks');
 };
 
 export const fetchQuests = async (): Promise<Quest[]> => {
-  await simulateDelay();
-  return [...quests];
+  return apiFetch('/quests'); // Backend returns an empty array
 };
 
 export const fetchTransactions = async (): Promise<Transaction[]> => {
-  await simulateDelay(800);
-  return [...transactions];
+  return apiFetch('/transactions');
 };
 
 export const fetchFriends = async (): Promise<Friend[]> => {
-  await simulateDelay(300);
-  return [...MOCK_FRIENDS];
+  return apiFetch('/friends'); // Backend returns an empty array
 };
 
 export const fetchUserCampaigns = async (): Promise<UserCampaign[]> => {
-    await simulateDelay(600); // jsut an api call to fetch all the user camaigns
-    return [...userCampaigns];
+    return apiFetch('/user-campaigns');
 };
 
 export const fetchPartnerCampaigns = async (): Promise<PartnerCampaign[]> => {
-    await simulateDelay(700);
-    return [...partnerCampaigns];
+    return apiFetch('/partner-campaigns');
 };
 
 export const addUserCampaign = async (campaignData: { link: string; goal: number; cost: number; }): Promise<{ success: boolean; message: string; newCampaign?: UserCampaign; user?: User; }> => {
-    await simulateDelay(1000);
-    if (users[0].adCredit < campaignData.cost) {
-        return { success: false, message: "Insufficient ad balance. Please add funds." };
-    }
-    users[0].adCredit -= campaignData.cost;
-    const newCampaign: UserCampaign = {
-        id: `uc${Date.now()}`,
-        link: campaignData.link,
-        status: 'Active',
-        completions: 0,
-        goal: campaignData.goal,
-        cost: campaignData.cost,
-        category: 'Social'
-    };
-    userCampaigns.unshift(newCampaign);
-    socialTasks.unshift(newCampaign);
-    return { success: true, message: 'Campaign created successfully!', newCampaign, user: { ...users[0] } };
+    return apiFetch('/user-campaigns', {
+        method: 'POST',
+        body: JSON.stringify(campaignData),
+    });
 };
 
 export const addPartnerTask = async (campaignData: { link: string; goal: number; cost: number; level: number }): Promise<{ success: boolean; message: string; newCampaign?: PartnerCampaign; user?: User; }> => {
-    await simulateDelay(1000);
-    if (users[0].adCredit < campaignData.cost) {
-        return { success: false, message: "Insufficient ad balance. Please add funds." };
-    }
-    users[0].adCredit -= campaignData.cost;
-    const newCampaign: PartnerCampaign = {
-        id: `pc${Date.now()}`,
-        link: campaignData.link,
-        status: 'Active',
-        completions: 0,
-        goal: campaignData.goal,
-        cost: campaignData.cost,
-        requiredLevel: campaignData.level
-    };
-    partnerCampaigns.unshift(newCampaign);
-    return { success: true, message: 'Partner task created successfully!', newCampaign, user: { ...users[0] } };
+    return apiFetch('/partner-tasks', {
+        method: 'POST',
+        body: JSON.stringify(campaignData),
+    });
 };
 
 export const depositAdCredit = async (amount: number): Promise<{ success: boolean; user: User }> => {
-    await simulateDelay(1000);
-    users[0].adCredit += amount;
-    transactions.unshift({
-        id: `d${Date.now()}`,
-        type: 'Deposit',
-        amount: amount,
-        currency: 'TON',
-        date: new Date().toISOString().split('T')[0],
-        status: 'Completed'
+    return apiFetch('/ad-credit/deposit', {
+        method: 'POST',
+        body: JSON.stringify({ amount }),
     });
-    return { success: true, user: { ...users[0] } };
 };
 
-export const claimDailyTask = async (taskId: string): Promise<{ success: boolean; user: User | null }> => {
-  await simulateDelay();
-  const taskIndex = dailyTasks.findIndex(t => t.id === taskId);
-  if (taskIndex !== -1 && !dailyTasks[taskIndex].claimed) {
-    users[0].coins += dailyTasks[taskIndex].reward;
-    dailyTasks[taskIndex].claimed = true;
-    
-    // Grant a spin for completing a task
-    if (users[0].tasksCompletedTodayForSpin < 50) {
-      users[0].spins += 1;
-      users[0].tasksCompletedTodayForSpin += 1;
-    }
-
-    return { success: true, user: { ...users[0] } };
-  }
-  return { success: false, user: null };
+export const claimDailyTask = async (taskId: string | number): Promise<{ success: boolean; user: User | null }> => {
+  return apiFetch(`/daily-tasks/${taskId}/claim`, {
+    method: 'POST',
+  });
 };
 
 export const claimReferralEarnings = async (): Promise<{ success: boolean; user: User | null }> => {
-    await simulateDelay();
-    if(users[0].referralEarnings > 0) {
-        users[0].coins += users[0].referralEarnings;
-        users[0].referralEarnings = 0;
-        return { success: true, user: { ...users[0] } };
-    }
-    return { success: false, user: null };
+    return apiFetch('/referrals/claim', {
+        method: 'POST',
+    });
 }
 
 export const executeWithdrawal = async (amountInTon: number): Promise<{ success: boolean; user: User | null }> => {
-    await simulateDelay(1500);
-    const amountInCoins = amountInTon * CONVERSION_RATE;
-    if (users[0].coins >= amountInCoins) {
-        users[0].coins -= amountInCoins;
-        users[0].ton += amountInTon;
-        
-        transactions.unshift({
-            id: `t${Date.now()}`,
-            type: 'Withdrawal',
-            amount: amountInTon,
-            currency: 'TON',
-            date: new Date().toISOString().split('T')[0],
-            status: 'Completed'
-        });
-        return { success: true, user: { ...users[0] } };
-    }
-    return { success: false, user: null };
+    return apiFetch('/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify({ amountInTon }),
+    });
 }
 
 export const spinWheel = async (): Promise<{ success: boolean; prize: { type: string; value: number; label: string; }; user: User }> => {
-    await simulateDelay(100);
-
-    if (users[0].spins <= 0) {
-      return {
-        success: false,
-        prize: { type: 'ERROR', value: 0, label: 'No spins left' },
-        user: { ...users[0] }
-      };
-    }
-
-    users[0].spins -= 1;
-
-    const totalWeight = SPIN_WHEEL_PRIZES.reduce((acc, prize) => acc + prize.weight, 0);
-    let randomWeight = Math.random() * totalWeight;
-    let selectedPrize = SPIN_WHEEL_PRIZES[SPIN_WHEEL_PRIZES.length - 1]; // fallback
-
-    for (const prize of SPIN_WHEEL_PRIZES) {
-        if (randomWeight < prize.weight) {
-            selectedPrize = prize;
-            break;
-        }
-        randomWeight -= prize.weight;
-    }
-    
-    if (selectedPrize.type === 'COINS') {
-        users[0].coins += selectedPrize.value;
-    }
-
-    return {
-        success: true,
-        prize: selectedPrize,
-        user: { ...users[0] }
-    };
+    return apiFetch('/spin-wheel', {
+        method: 'POST',
+    });
 };
 
 export const watchAdForSpin = async(): Promise<{success: boolean; message: string; user?: User}> => {
-    await simulateDelay(200);
-    if (users[0].adsWatchedToday >= 50) {
-        return { success: false, message: "Daily limit for ad spins reached." };
-    }
-    users[0].adsWatchedToday += 1;
-    users[0].spins += 1;
-    return { success: true, message: "+1 Spin!", user: { ...users[0] } };
+    return apiFetch('/spins/watch-ad', {
+        method: 'POST',
+    });
 }
 
 export const completeTaskForSpin = async(): Promise<{success: boolean; message: string; user?: User}> => {
-    await simulateDelay(50);
-     if (users[0].tasksCompletedTodayForSpin >= 50) {
-        return { success: false, message: "Daily limit for task spins reached." };
-    }
-    users[0].tasksCompletedTodayForSpin += 1;
-    users[0].spins += 1;
-    return { success: true, message: "+1 Spin for completing a task!", user: { ...users[0] } };
+    return apiFetch('/spins/complete-task', {
+        method: 'POST',
+    });
 }
 
 export const inviteFriendForSpin = async(): Promise<{success: boolean; message: string; user?: User}> => {
-    await simulateDelay(50);
-     if (users[0].friendsInvitedTodayForSpin >= 50) {
-        return { success: false, message: "Daily limit for friend invite spins reached." };
-    }
-    users[0].friendsInvitedTodayForSpin += 1;
-    users[0].spins += 1;
-    return { success: true, message: "+1 Spin for inviting a friend!", user: { ...users[0] } };
+    return apiFetch('/spins/invite-friend', {
+        method: 'POST',
+    });
 }
 
 export const buySpins = async (packageId: string, currency: 'TON' | 'COINS'): Promise<{ success: boolean; message: string; user?: User; }> => {
-    await simulateDelay(1000);
-    const selectedPackage = SPIN_STORE_PACKAGES.find(p => p.id === packageId);
-    if (!selectedPackage) {
-        return { success: false, message: "Invalid package selected." };
-    }
-    
-    if (currency === 'TON') {
-        // Handled client-side, just award spins
-    } else { // currency === 'COINS'
-        const costInCoins = selectedPackage.costTon * CONVERSION_RATE;
-        if (users[0].coins < costInCoins) {
-            return { success: false, message: "Insufficient coin balance." };
-        }
-        users[0].coins -= costInCoins;
-    }
-
-    users[0].spins += selectedPackage.spins;
-
-    return {
-        success: true,
-        message: `Successfully purchased ${selectedPackage.spins.toLocaleString()} spins!`,
-        user: { ...users[0] }
-    };
+    return apiFetch('/spins/buy', {
+        method: 'POST',
+        body: JSON.stringify({ packageId, currency }),
+    });
 };
 
 export const redeemPromoCode = async (code: string): Promise<{ success: boolean; message: string; user?: User; }> => {
-    await simulateDelay(400);
-    const promoCode = promoCodes.find(p => p.code.toLowerCase() === code.toLowerCase());
-
-    if (!promoCode) {
-        return { success: false, message: 'Invalid promo code.' };
-    }
-    if (promoCode.usedBy.length >= promoCode.maxUses) {
-        return { success: false, message: 'This promo code has reached its usage limit.' };
-    }
-    if (promoCode.expiresAt && new Date(promoCode.expiresAt) < new Date()) {
-        return { success: false, message: 'This promo code has expired.' };
-    }
-    if (promoCode.usedBy.includes(users[0].id)) {
-        return { success: false, message: 'You have already used this promo code.' };
-    }
-
-    let rewardMessage = '';
-    switch (promoCode.type) {
-        case 'COINS':
-            users[0].coins += promoCode.value;
-            rewardMessage = `${promoCode.value.toLocaleString()} Coins`;
-            break;
-        case 'SPINS':
-            users[0].spins += promoCode.value;
-            rewardMessage = `${promoCode.value} free spin(s)`;
-            break;
-        case 'TON_AD_CREDIT':
-            users[0].adCredit += promoCode.value;
-            rewardMessage = `${promoCode.value} TON in ad credits`;
-            break;
-    }
-
-    promoCode.usedBy.push(users[0].id);
-    
-    return {
-        success: true,
-        message: `Successfully redeemed! You received ${rewardMessage}.`,
-        user: { ...users[0] }
-    };
+    return apiFetch('/promo-codes/redeem', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+    });
 };
 
 // --- Admin-facing API ---
 
 export const adminLogin = async (username: string, password: string): Promise<{ success: boolean, token?: string }> => {
-    await simulateDelay();
-    const admin = admins.find(a => a.username === username && a.password === password);
-    if (admin) {
-        return { success: true, token: `mock_token_${admin.id}` };
+    const response = await apiFetch('/admin/login', {
+        method: 'POST',
+        // We don't need the user/admin headers for the login itself
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+    });
+
+    if (response.success && response.token) {
+        try {
+            localStorage.setItem('admin_token', response.token);
+        } catch (e) {
+            console.error("Failed to save admin token to localStorage.", e);
+        }
     }
-    return { success: false };
+    return response;
+};
+
+export const adminLogout = (): void => {
+    try {
+        localStorage.removeItem('admin_token');
+    } catch (e) {
+        console.error("Failed to remove admin token from localStorage.", e);
+    }
 };
 
 export const fetchDashboardStats = async () => {
-    await simulateDelay();
-    const totalUsers = users.length;
-    const totalCoins = users.reduce((acc, u) => acc + u.coins, 0);
-    const totalWithdrawals = transactions.filter(t => t.type === 'Withdrawal').reduce((acc, t) => acc + t.amount, 0);
-    const tasksCompleted = dailyTasks.filter(t => t.claimed).length;
-    return { totalUsers, totalCoins, totalWithdrawals, tasksCompleted };
+    return apiFetch('/admin/dashboard-stats');
 };
 
 export const fetchAllUsers = async (): Promise<User[]> => {
-    await simulateDelay();
-    return [...users];
+    return apiFetch('/admin/users');
 };
 
 export const updateUser = async (userId: number, data: Partial<User>): Promise<{ success: boolean, user?: User }> => {
-    await simulateDelay();
-    const userIndex = users.findIndex(u => u.id === userId);
-    if (userIndex !== -1) {
-        users[userIndex] = { ...users[userIndex], ...data };
-        return { success: true, user: users[userIndex] };
-    }
-    return { success: false };
+    return apiFetch(`/admin/users/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+    });
 };
 
 export const fetchAllPromoCodes = async (): Promise<PromoCode[]> => {
-    await simulateDelay();
-    return [...promoCodes];
+    return apiFetch('/admin/promo-codes');
 };
 
 export const createPromoCode = async (data: Omit<PromoCode, 'usedBy'>): Promise<{ success: boolean, code?: PromoCode }> => {
-    await simulateDelay();
-    if (promoCodes.some(p => p.code.toLowerCase() === data.code.toLowerCase())) {
-        return { success: false };
-    }
-    const newCode = { ...data, usedBy: [] };
-    promoCodes.unshift(newCode);
-    return { success: true, code: newCode };
+    return apiFetch('/admin/promo-codes', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
 };
 
 export const fetchSettings = async () => {
-    await simulateDelay();
-    return { ...settings, admins: [...admins] };
+    return apiFetch('/admin/settings');
 };
 
-export const updateSettings = async (newSettings: Partial<typeof settings>): Promise<{ success: boolean, settings?: typeof settings }> => {
-    await simulateDelay();
-    settings = { ...settings, ...newSettings };
-    return { success: true, settings: { ...settings }};
+export const updateSettings = async (newSettings: Partial<any>): Promise<{ success: boolean, settings?: any }> => {
+    return apiFetch('/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(newSettings),
+    });
 };
 
 export const createAdminTask = async (task: Omit<Task, 'id' | 'icon'>): Promise<{ success: boolean, task?: Task }> => {
-    await simulateDelay();
-    const newTask: Task = {
-        ...task,
-        id: `task-${Date.now()}`,
-        icon: ICONS.tasks, // Generic icon for admin-added tasks
-    };
-
-    switch (task.category) {
-        case 'Daily':
-            dailyTasks.push({ ...newTask, mandatory: false });
-            break;
-        case 'Game':
-             gameTasks.push({
-                id: newTask.id,
-                link: 'https://t.me/example_game_bot',
-                status: 'Active',
-                completions: 0,
-                goal: 1, // Simplified
-                cost: 0.1, // Simplified
-                category: 'Game'
-            });
-            break;
-        case 'Social':
-            socialTasks.push({
-                id: newTask.id,
-                link: 'https://t.me/example_social_channel',
-                status: 'Active',
-                completions: 0,
-                goal: 1, // Simplified
-                cost: 0.1, // Simplified
-                category: 'Social'
-            });
-            break;
-        case 'Partner':
-             partnerCampaigns.push({
-                id: newTask.id,
-                link: 'https://t.me/example_partner_bot',
-                status: 'Active',
-                completions: 0,
-                goal: 1,
-                cost: 1,
-                requiredLevel: 5,
-                category: 'Game' // Partner tasks are a form of game task
-             });
-             break;
-        default:
-            return { success: false };
-    }
-    return { success: true, task: newTask };
+    return apiFetch('/admin/tasks', {
+        method: 'POST',
+        body: JSON.stringify(task),
+    });
 };
