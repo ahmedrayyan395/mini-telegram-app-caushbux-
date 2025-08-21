@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             allowedHosts: [
-                'a9e0d6bd80a5.ngrok-free.app', // Add your ngrok host here
+                'b1423509dc2e.ngrok-free.app', // Add your ngrok host here
                 'localhost', // You can also add localhost if needed
             ],
             // Optionally, you can add other server settings like port, cors, etc.

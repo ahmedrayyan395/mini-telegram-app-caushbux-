@@ -55,15 +55,40 @@ export interface AdminUser {
     permissions: string[];
 }
 
-
+/**
+ * Represents a user-created campaign, perfectly matching the `user_campaigns` database table.
+ * This type reflects the data structure sent from the backend API.
+ */
 export interface UserCampaign {
-  id: string;
+  /** The unique numeric identifier for the campaign. */
+  id: number;
+
+  /** The ID of the user who created the campaign. */
+  userId: number;
+
+  /** The category of the campaign. Replaces the old `category` field. */
+  campaignType: 'Game' | 'Social' | 'Partner';
+
+  /** The target URL for the campaign (e.g., a Telegram channel link). */
   link: string;
-  status: 'Active' | 'Paused' | 'Completed';
-  completions: number;
+
+  /** The target number of completions for the campaign. */
   goal: number;
+
+  /** The total cost (in TON) that the user has allocated for this campaign. */
   cost: number;
-  category?: 'Social' | 'Game';
+
+  /** The current operational status of the campaign. Note the new 'Expired' value. */
+  status: 'Active' | 'Completed' | 'Expired' | 'Paused';
+
+  /** The current number of completions. Replaces the old `completions` field. */
+  progress: number;
+
+  /** The date and time when the campaign was created, in ISO 8601 string format. */
+  createdAt: string;
+
+  /** The date and time when the campaign was last updated, in ISO 8601 string format. */
+  updatedAt: string;
 }
 
 

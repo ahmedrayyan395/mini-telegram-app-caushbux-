@@ -3,7 +3,7 @@ import type { User, DailyTask, GameTask, Quest, Transaction, Friend, UserCampaig
 import { INITIAL_USER, ICONS } from '../constants';
 
 // The base URL of your running Flask backend
-const API_BASE_URL = 'https://c4ab75dd5ccf.ngrok-free.app';
+const API_BASE_URL = 'http://127.0.0.1:5000';
 
 // --- API Helper Functions ---
 
@@ -13,6 +13,13 @@ const API_BASE_URL = 'https://c4ab75dd5ccf.ngrok-free.app';
  * For now, it defaults to 1 to match the backend's default user.
  */
 const getCurrentUserId = (): number => 1;
+
+
+
+
+
+
+
 
 /**
  * Retrieves the stored admin authentication token from localStorage.
@@ -34,7 +41,43 @@ const getAdminToken = (): string | null => {
 
 
 
+
+/**
+ * ========================================================================
+ * DEVELOPMENT ONLY LOGIN METHOD
+ */
+
+
+export const devLogin = async (userId: number): Promise<User> => {
+  // Use the apiFetch helper to make the network request.
+  // It calls the backend endpoint we created: /dev/login/<user_id>
+  const user = await apiFetch(`/dev/login/${userId}`, {
+    method: 'POST',
+    // No body is needed because the user's ID is in the URL.
+  });
+
+  
+  return {
+    ...user,
+    spaceDefenderProgress: user.spaceDefenderProgress || INITIAL_USER.spaceDefenderProgress,
+    streetRacingProgress: user.streetRacingProgress || INITIAL_USER.streetRacingProgress,
+  };
+};
+
+
+
+
+
+
+
 // --- NEW Authentication Function ---
+
+
+
+
+
+
+
 
 /**
  * Authenticates the user with the backend using the initData string from the Telegram Web App.
@@ -63,6 +106,8 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
         'Content-Type': 'application/json',
         // 'X-User-Id': String(getCurrentUserId()), // Identify the user for the backend
         ...options.headers,
+
+        
     };
 
     const adminToken = getAdminToken();
@@ -157,6 +202,12 @@ export const depositAdCredit = async (amount: number): Promise<{ success: boolea
         body: JSON.stringify({ amount }),
     });
 };
+
+
+
+
+
+
 
 export const claimDailyTask = async (taskId: string | number): Promise<{ success: boolean; user: User | null }> => {
   return apiFetch(`/daily-tasks/${taskId}/claim`, {

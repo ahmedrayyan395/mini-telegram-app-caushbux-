@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import type { DailyTask, GameTask, User, PartnerCampaign, UserCampaign } from '../types';
+import type { DailyTask, User, PartnerCampaign, UserCampaign } from '../types';
 import { fetchDailyTasks, claimDailyTask, fetchPartnerCampaigns, fetchUserCampaigns, redeemPromoCode, completeTaskForSpin } from '../services/api';
 import { ICONS, CONVERSION_RATE } from '../constants';
 
-// Declare the ad SDK function to make it available in the component
-declare const show_9692552: (type?: 'pop') => Promise<void>;
+// Declare the ad SDK function on the global Window interface.
+// This tells TypeScript to expect it, but allows it to be optional (`?`).
+declare global {
+    interface Window {
+        show_9692552?: (type?: 'pop') => Promise<void>;
+    }
+}
 
-const DailyTaskItem: React.FC<{ task: DailyTask; onClaim: (id: string) => void }> = ({ task, onClaim }) => {
+// ========================================================================
+// Sub-components for different task types
+// ========================================================================
 
+const DailyTaskItem: React.FC<{ task: DailyTask; onClaim: (id: number | string) => void }> = ({ task, onClaim }) => {
   const isClaimable = !task.claimed;
-
   const getButtonContent = () => {
-    
     if (task.claimed) return 'Claimed';
     if (task.action === 'share') return 'Share';
     if (task.action === 'link') return 'Subscribe';
@@ -21,7 +27,8 @@ const DailyTaskItem: React.FC<{ task: DailyTask; onClaim: (id: string) => void }
   return (
     <div className="bg-slate-800 p-4 rounded-lg flex items-center justify-between">
       <div className="flex items-center space-x-4">
-        <div className="bg-slate-700 p-3 rounded-full text-green-500">{task.icon}</div>
+        {/* Using a default icon from ICONS map */}
+        <div className="bg-slate-700 p-3 rounded-full text-green-500">{ICONS.tasks}</div>
         <div>
           <h3 className="font-semibold text-white">{task.title}</h3>
           <p className="text-sm text-slate-400">+{task.reward.toLocaleString()} Coins</p>
@@ -31,9 +38,7 @@ const DailyTaskItem: React.FC<{ task: DailyTask; onClaim: (id: string) => void }
         onClick={() => isClaimable && onClaim(task.id)}
         disabled={!isClaimable}
         className={`font-bold py-2 px-4 rounded-lg text-sm transition-colors w-24 text-center ${
-          task.claimed
-            ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-            : 'bg-green-500 text-white hover:bg-green-600'
+          task.claimed ? 'bg-slate-600 text-slate-400 cursor-not-allowed' : 'bg-green-500 text-white hover:bg-green-600'
         }`}
       >
         {getButtonContent()}
@@ -45,14 +50,17 @@ const DailyTaskItem: React.FC<{ task: DailyTask; onClaim: (id: string) => void }
 const CampaignTaskItem: React.FC<{ task: UserCampaign; icon: React.ReactNode; description: string; buttonClass: string; onStart: () => void }> = ({ task, icon, description, buttonClass, onStart }) => {
   const reward = (task.cost / (task.goal || 1)) * 0.4 * CONVERSION_RATE;
   let taskName = 'Campaign Task';
+  
+  // Defensive URL parsing to prevent crashes from bad data.
   try {
-    const rawName = new URL(task.link).pathname.split('/')[1];
-    taskName = rawName?.replace(/^my_?/i, '').replace(/_/g, ' ') || taskName;
+    if (task.link && (task.link.startsWith('http') || task.link.startsWith('https'))) {
+        const rawName = new URL(task.link).pathname.split('/')[1];
+        taskName = rawName?.replace(/^my_?/i, '').replace(/_/g, ' ') || taskName;
+    }
   } catch (e) {
       console.error("Invalid campaign link URL:", task.link);
   }
   const title = taskName.charAt(0).toUpperCase() + taskName.slice(1);
-
 
   return (
     <div className="bg-slate-800 p-4 rounded-lg flex items-center justify-between">
@@ -77,14 +85,16 @@ const CampaignTaskItem: React.FC<{ task: UserCampaign; icon: React.ReactNode; de
   );
 };
 
-
 const PartnerTaskItem: React.FC<{ task: PartnerCampaign, onStart: () => void }> = ({ task, onStart }) => {
   const reward = (task.cost / (task.goal || 1)) * 0.4 * CONVERSION_RATE;
   let botName = 'Partner Bot';
+  
   try {
-    const rawName = new URL(task.link).pathname.split('/')[1];
-    botName = rawName?.replace(/^my_?/i, '').replace(/_/g, ' ') || botName;
-  } catch (e)      {
+    if (task.link && (task.link.startsWith('http') || task.link.startsWith('https'))) {
+        const rawName = new URL(task.link).pathname.split('/')[1];
+        botName = rawName?.replace(/^my_?/i, '').replace(/_/g, ' ') || botName;
+    }
+  } catch (e) {
       console.error("Invalid partner link URL:", task.link);
   }
   const title = botName.charAt(0).toUpperCase() + botName.slice(1);
@@ -122,7 +132,7 @@ const TasksLockedOverlay = () => (
     </div>
 );
 
-const PromoCodeSection: React.FC<{ setUser: (user: User) => void }> = ({ setUser }) => {
+const PromoCodeSection: React.FC<{ setUser: React.Dispatch<React.SetStateAction<User | null>> }> = ({ setUser }) => {
   const [code, setCode] = useState('');
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -136,8 +146,8 @@ const PromoCodeSection: React.FC<{ setUser: (user: User) => void }> = ({ setUser
     
     setFeedback({ message: result.message, isError: !result.success });
     if (result.success && result.user) {
-      setUser(result.user);
-      setCode(''); // Clear input on success
+      setUser(prevUser => prevUser ? { ...prevUser, ...result.user } : result.user);
+      setCode('');
     }
     setIsLoading(false);
   };
@@ -154,13 +164,11 @@ const PromoCodeSection: React.FC<{ setUser: (user: User) => void }> = ({ setUser
                     placeholder="ENTER PROMO CODE"
                     className="flex-grow bg-slate-700 border border-slate-600 rounded-lg p-3 text-white placeholder-slate-400 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition uppercase"
                     disabled={isLoading}
-                    aria-label="Promo Code Input"
                 />
                 <button
                     onClick={handleRedeem}
                     disabled={!code || isLoading}
                     className="bg-green-500 text-white font-bold py-3 px-6 rounded-lg transition-colors hover:bg-green-600 disabled:bg-slate-600 disabled:cursor-not-allowed"
-                    aria-label="Apply Promo Code"
                 >
                     {isLoading ? '...' : 'Apply'}
                 </button>
@@ -175,78 +183,88 @@ const PromoCodeSection: React.FC<{ setUser: (user: User) => void }> = ({ setUser
   );
 };
 
+// ========================================================================
+// Main EarningsPage Component
+// ========================================================================
 
-const EarningsPage: React.FC<{ setUser: (user: User) => void }> = ({ setUser }) => {
+const EarningsPage: React.FC<{ setUser: React.Dispatch<React.SetStateAction<User | null>> }> = ({ setUser }) => {
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
   const [gameTasks, setGameTasks] = useState<UserCampaign[]>([]);
   const [socialTasks, setSocialTasks] = useState<UserCampaign[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<PartnerCampaign[]>([]);
-
   const [dailyTasksCompleted, setDailyTasksCompleted] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   const checkDailyCompletion = (tasks: DailyTask[]) => {
-    const allMandatoryClaimed = tasks
-      .filter(t => t.mandatory)
-      .every(t => t.claimed);
-
+    const allMandatoryClaimed = tasks.filter(t => t.mandatory).every(t => t.claimed);
     setDailyTasksCompleted(allMandatoryClaimed);
   };
 
-
   useEffect(() => {
-    fetchDailyTasks().then(tasks => {
-        setDailyTasks(tasks);
-        checkDailyCompletion(tasks);
-    });
+    const loadAllTasks = async () => {
+        setIsLoading(true);
+        try {
+            const daily = await fetchDailyTasks();
+            setDailyTasks(daily);
+            checkDailyCompletion(daily);
 
-    fetchUserCampaigns().then(campaigns => {
-        setGameTasks(campaigns.filter(c => c.category === 'Game'));
-        setSocialTasks(campaigns.filter(c => c.category === 'Social'));
-    });
+            const campaigns = await fetchUserCampaigns();
+            setGameTasks(campaigns.filter(c => c.campaignType === 'Game'));
+            setSocialTasks(campaigns.filter(c => c.campaignType === 'Social'));
 
-    fetchPartnerCampaigns().then(setPartnerTasks);
+            const partners = await fetchPartnerCampaigns();
+            setPartnerTasks(partners);
+        } catch (error) {
+            console.error("Failed to load tasks:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    loadAllTasks();
   }, []);
-
-
-
 
   const handleTaskSpinReward = async () => {
     const result = await completeTaskForSpin();
     if (result.success && result.user) {
-        setUser(result.user);
-        // Optionally show a small notification/toast here
+        setUser(prev => prev ? { ...prev, ...result.user } : result.user);
     }
   };
 
-  const processClaim = async (taskId: string) => {
+  const processClaim = async (taskId: number | string) => {
     const result = await claimDailyTask(taskId);
     if (result.success && result.user) {
-      setUser(result.user);
+      setUser(prev => prev ? { ...prev, ...result.user } : result.user);
       const updatedTasks = dailyTasks.map(t => (t.id === taskId ? { ...t, claimed: true } : t));
       setDailyTasks(updatedTasks);
       checkDailyCompletion(updatedTasks);
     }
   };
 
-  const handleClaim = async (taskId: string) => {
+  const handleClaim = async (taskId: number | string) => {
     const task = dailyTasks.find(t => t.id === taskId);
     if (!task || task.claimed) return;
 
-    if (task.id === 'dt1') {
-      try {
-        await show_9692552();
-        await processClaim(taskId);
-      } catch (e) {
-        console.error("Ad failed or was closed early:", e);
-        alert("You must watch the entire ad to claim the reward.");
+    // Defensive check for the ad-related task
+    if (task.id === 'dt1' || task.title.toLowerCase().includes('watch ad')) {
+      if (typeof window.show_9692552 === 'function') {
+        try {
+          await window.show_9692552();
+          await processClaim(taskId);
+        } catch (e) {
+          console.error("Ad failed or was closed early:", e);
+          alert("You must watch the entire ad to claim the reward.");
+        }
+      } else {
+        console.error("Ad SDK (show_9692552) is not available.");
+        alert("Could not display ad. It might be blocked. Please try again later.");
       }
       return;
     }
 
     if (task.action === 'share') {
-      const referralLink = 'https://t.me/cashubux_bot?start=ref12345';
+      const referralLink = 'https://t.me/your_bot_name_bot?start=ref12345'; // Replace with your bot link
       const url = encodeURIComponent(referralLink);
-      const text = encodeURIComponent("Join me on CashUBux Bot and earn crypto together!");
+      const text = encodeURIComponent("Join me on this awesome bot and earn crypto!");
       const telegramUrl = `https://t.me/share/url?url=${url}&text=${text}`;
       window.open(telegramUrl, '_blank');
     }
@@ -258,11 +276,9 @@ const EarningsPage: React.FC<{ setUser: (user: User) => void }> = ({ setUser }) 
     await processClaim(taskId);
   };
 
-
-
-
-
-
+  if (isLoading) {
+    return <div className="text-center text-slate-400 py-10">Loading tasks...</div>;
+  }
   
   return (
     <div className="space-y-8">
@@ -329,7 +345,6 @@ const EarningsPage: React.FC<{ setUser: (user: User) => void }> = ({ setUser }) 
             </section>
         </div>
     </div>
-
     </div>
   );
 };

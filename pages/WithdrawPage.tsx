@@ -75,14 +75,19 @@ const WithdrawPage: React.FC<{ user: User | null, setUser: (user: User) => void 
         )}
 
         <div className="flex space-x-3">
-          {!wallet ? (
+          {!wallet ? 
+          (
             <button
               onClick={() => tonConnectUI.openModal()}
               className="w-full bg-green-500 text-white font-bold py-3 rounded-lg hover:bg-green-600 transition-colors"
             >
               Connect Wallet
             </button>
-          ) : (
+          ) 
+          
+          : 
+          //else
+          (
              <button
               onClick={() => tonConnectUI.disconnect()}
               className="w-full bg-red-500 text-white font-bold py-3 rounded-lg hover:bg-red-600 transition-colors"

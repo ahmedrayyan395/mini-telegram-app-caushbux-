@@ -1,6 +1,7 @@
 import datetime
 import json
 import random
+from urllib.parse import urlparse
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -13,8 +14,18 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
+app.secret_key = 'replace-this-with-your-own-very-secret-key'
+
+
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_SECURE'] = True
+
+
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///mini_telegram_app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+
+
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -42,13 +53,69 @@ class User(db.Model):
     last_login = db.Column(db.DateTime, default=datetime.now())
     
     # Relationships
-    tasks = db.relationship('Task', backref='user', lazy=True)
+    # tasks = db.relationship('Task', backref='user', lazy=True)
     transactions = db.relationship('Transaction', backref='user', lazy=True)
     space_defender_progress = db.relationship('SpaceDefenderProgress', backref='user', uselist=False)
     street_racing_progress = db.relationship('StreetRacingProgress', backref='user', uselist=False)
     promo_code_uses = db.relationship('PromoCodeUse', backref='user', lazy=True)
     referrals = db.relationship('Referral', foreign_keys='Referral.referrer_id', backref='referrer', lazy=True)
     referred_by = db.relationship('Referral', foreign_keys='Referral.referred_id', backref='referred', uselist=False)
+
+    def to_dict(self):
+        """Converts the User object and its key relationships into a JSON-serializable dictionary."""
+        
+        # --- Handle Nested Relationship Data ---
+        # For one-to-one relationships, we can serialize them directly.
+        # It's important to check if they exist first.
+        
+        space_defender_data = None
+        if self.space_defender_progress:
+            space_defender_data = {
+                "weaponLevel": self.space_defender_progress.weapon_level,
+                "shieldLevel": self.space_defender_progress.shield_level,
+                "speedLevel": self.space_defender_progress.speed_level
+            }
+
+        street_racing_data = None
+        if self.street_racing_progress:
+            street_racing_data = {
+                "currentCar": self.street_racing_progress.current_car,
+                "careerPoints": self.street_racing_progress.career_points
+                # Note: Unlocked cars and upgrades are in separate tables,
+                # so they would typically be fetched via their own API endpoints
+                # to keep this initial user payload smaller.
+            }
+        
+        # --- Main User Dictionary ---
+        return {
+            "id": self.id,
+            "telegramId": self.telegram_id,
+            "username": self.username,
+            "firstName": self.first_name,
+            "lastName": self.last_name,
+            "language": self.language,
+            "coins": self.coins,
+            "ton": self.ton,
+            "referralEarnings": self.referral_earnings,
+            "spins": self.spins,
+            "adCredit": self.ad_credit,
+            "adsWatchedToday": self.ads_watched_today,
+            "tasksCompletedTodayForSpin": self.tasks_completed_today_for_spin,
+            "friendsInvitedTodayForSpin": self.friends_invited_today_for_spin,
+            "banned": self.banned,
+            
+            # Convert datetime objects to ISO 8601 string format, which is a standard.
+            # Check if they exist to prevent errors on newly created objects.
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+            "lastLogin": self.last_login.isoformat() if self.last_login else None,
+            
+            # Include the serialized relationship data.
+            "spaceDefenderProgress": space_defender_data,
+            "streetRacingProgress": street_racing_data
+        }
+
+
+
 
 class SpaceDefenderProgress(db.Model):
     __tablename__ = "space_defender_progress"
@@ -166,38 +233,39 @@ class UserPartnerTask(db.Model):
 
     __table_args__ = (db.UniqueConstraint('user_id', 'partner_task_id', name='_user_partner_task_uc'),)
 
+
 #Unified Table for Social & Game Tasks
 
-class Task(db.Model):
-    __tablename__ = "tasks"
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text)
-    reward = db.Column(db.Integer, default=0, nullable=False)
+# class Task(db.Model):
+#     __tablename__ = "tasks"
+#     id = db.Column(db.Integer, primary_key=True)
+#     title = db.Column(db.String(255), nullable=False)
+#     description = db.Column(db.Text)
+#     reward = db.Column(db.Integer, default=0, nullable=False)
 
-    category = db.Column(db.String(32), nullable=False)  # 'Social', 'Game'
-    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#     category = db.Column(db.String(32), nullable=False)  # 'Social', 'Game'
+#     created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-    task_type = db.Column(db.String(64), nullable=False)  # 'share', 'invite', 'play_game'
-    icon_name = db.Column(db.String(64))
-    link = db.Column(db.String(255))
-    active = db.Column(db.Boolean, default=True)
+#     task_type = db.Column(db.String(64), nullable=False)  # 'share', 'invite', 'play_game'
+#     icon_name = db.Column(db.String(64))
+#     link = db.Column(db.String(255))
+#     active = db.Column(db.Boolean, default=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.now())
-    updated_at = db.Column(db.DateTime, default=datetime.now(), onupdate=datetime.now())
+#     created_at = db.Column(db.DateTime, default=datetime.now())
+#     updated_at = db.Column(db.DateTime, default=datetime.now(), onupdate=datetime.now())
 
-class UserTask(db.Model):
-    __tablename__ = "user_tasks"
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'), nullable=False)
+# class UserTask(db.Model):
+#     __tablename__ = "user_tasks"
+#     id = db.Column(db.Integer, primary_key=True)
+#     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#     task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'), nullable=False)
 
-    completed = db.Column(db.Boolean, default=False)
-    claimed = db.Column(db.Boolean, default=False)
-    progress = db.Column(db.Integer, default=0)  # useful for multi-step tasks
-    completed_at = db.Column(db.DateTime)
+#     completed = db.Column(db.Boolean, default=False)
+#     claimed = db.Column(db.Boolean, default=False)
+#     progress = db.Column(db.Integer, default=0)  # useful for multi-step tasks
+#     completed_at = db.Column(db.DateTime)
 
-    __table_args__ = (db.UniqueConstraint('user_id', 'task_id', name='_user_task_uc'),)
+#     __table_args__ = (db.UniqueConstraint('user_id', 'task_id', name='_user_task_uc'),)
 
 
 
@@ -308,6 +376,7 @@ class UserCampaign(db.Model):
     progress = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.now())
     updated_at = db.Column(db.DateTime, default=datetime.now(), onupdate=datetime.now())
+    
 
 class LanguageOption(db.Model):
     __tablename__ = "language_options"
@@ -380,99 +449,60 @@ def seed_users():
 
     print("✅ Users seeded")
 
-
-
-
-
-
-# ENDPOINTS
-
-
-
-
-
-
-
-# ----------------------------
-# Helpers
-# ----------------------------
-
-CONVERSION_RATE = 1000  # 1 TON => 1000 coins (adjust if you store in SystemSetting)
-
-def now():
-    return datetime.now()()
-
-
-# NEW ENDPOINT: /auth/telegram
-@app.post('/auth/telegram')
-def auth_with_telegram():
-    data = request.get_json()
-    print(data)
-    init_data_str = data.get('initData')
-
-    if not init_data_str:
-        return jsonify({"error": "initData is required"}), 400
-
-    # !!! CRITICAL SECURITY STEP: You MUST validate the hash here !!!
-    # This is a simplified example. A full implementation requires crypto libraries.
-    # See Telegram documentation for hash validation.
-    # If validation fails: return jsonify({"error": "Invalid hash"}), 403
-
-    # Parse the initData string
-    params = dict(p.split('=') for p in init_data_str.split('&'))
-    user_data = json.loads(params.get('user', '{}'))
+@app.cli.command("seed-admin")
+def seed_admin():
+    """Creates an initial admin user for the application."""
     
-    telegram_id = user_data.get('id')
-    if not telegram_id:
-        return jsonify({"error": "Invalid user data in initData"}), 400
+    # --- Define your default admin credentials here ---
+    # IMPORTANT: Change the password for a real production environment.
+    ADMIN_USERNAME = "admin"
+    ADMIN_PASSWORD = "admin"
+    
+    # Check if the admin user already exists to avoid errors
+    if AdminUser.query.filter_by(username=ADMIN_USERNAME).first():
+        print(f"Admin user '{ADMIN_USERNAME}' already exists. Skipping.")
+        return
 
-    # Find or create the user
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    if not user:
-        user = User(
-            telegram_id=telegram_id,
-            username=user_data.get('username'),
-            first_name=user_data.get('first_name'),
-            last_name=user_data.get('last_name'),
-            language=user_data.get('language_code'),
-            last_login=datetime.now()
-        )
-        db.session.add(user)
-    else:
-        # Update user details if they have changed
-        user.username = user_data.get('username')
-        user.first_name = user_data.get('first_name')
-        user.last_name = user_data.get('last_name')
-        user.last_login = datetime.now()
+    print(f"Creating initial admin user: {ADMIN_USERNAME}")
 
+    # Create a new admin user instance
+    new_admin = AdminUser(
+        username=ADMIN_USERNAME,
+        # Give the first admin all permissions. A wildcard '*' is a common convention.
+        permissions='*', 
+        active=True
+    )
+
+    # Use the secure method to hash and set the password
+    new_admin.set_password(ADMIN_PASSWORD)
+
+    # Add the new admin to the database session and commit
+    db.session.add(new_admin)
     db.session.commit()
 
-    # Store the user's ID in the session to log them in
-    session['user_id'] = user.id
+    print(f"✅ Admin user '{ADMIN_USERNAME}' created successfully.")
+    print("You can now log in to the admin panel.")
 
-    # Return the user's data (you should create a to_dict method on your User model)
-    return jsonify(user.to_dict()) # Assuming you have a to_dict method
-
-
-
-# NEW ENDPOINT for the updated fetchUser
-@app.get('/user/me')
-def get_current_user():
-    user = current_user()
-    if not user:
-        return jsonify({"error": "Not authenticated"}), 401
-    return jsonify(user.to_dict()) # Return the logged-in user's data
-
-
+def user_campaign_to_dict(campaign: UserCampaign):
+    return {
+        "id": campaign.id,
+        "userId": campaign.user_id,
+        "campaignType": campaign.campaign_type,
+        "link": campaign.link,
+        "goal": campaign.goal,
+        "cost": campaign.cost,
+        "status": campaign.status,
+        "progress": campaign.progress,
+        "createdAt": campaign.created_at.isoformat() if campaign.created_at else None,
+        "updatedAt": campaign.updated_at.isoformat() if campaign.updated_at else None
+    }
 
 
 # IMPORTANT: This function needs to be updated to use sessions
 def current_user():
-    if 'user_id' in session:
+    if  'user_id' in session:
         return User.query.get(session['user_id'])
-    return None # No user is logged in
-
-
+    return  User.query.get(2) # No user is logged in
 
 
 def get_setting(key, default=None):
@@ -506,21 +536,21 @@ def require_admin():
         return None
     return AdminUser.query.get(admin_id)
 
-def task_to_dict(t: Task):
-    return {
-        "id": t.id,
-        "title": t.title,
-        "description": t.description,
-        "reward": t.reward,
-        "category": t.category,
-        "taskType": t.task_type,
-        "iconName": t.icon_name,
-        "link": t.link,
-        "active": t.active,
-        "createdByUserId": t.created_by_user_id,
-        "createdAt": t.created_at.isoformat() if t.created_at else None,
-        "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
-    }
+# def task_to_dict(t: Task):
+#     return {
+#         "id": t.id,
+#         "title": t.title,
+#         "description": t.description,
+#         "reward": t.reward,
+#         "category": t.category,
+#         "taskType": t.task_type,
+#         "iconName": t.icon_name,
+#         "link": t.link,
+#         "active": t.active,
+#         "createdByUserId": t.created_by_user_id,
+#         "createdAt": t.created_at.isoformat() if t.created_at else None,
+#         "updatedAt": t.updated_at.isoformat() if t.updated_at else None,
+#     }
 
 def daily_task_to_dict(t: DailyTask, user: User):
     # include claimed/completed (derived from UserDailyTask)
@@ -573,6 +603,144 @@ def user_campaign_to_dict(c: UserCampaign):
         "updatedAt": c.updated_at.isoformat() if c.updated_at else None,
     }
 
+
+
+# ENDPOINTS
+
+
+
+
+
+
+
+# ----------------------------
+# Helpers
+# ----------------------------
+
+CONVERSION_RATE = 1000  # 1 TON => 1000 coins (adjust if you store in SystemSetting)
+
+def now():
+    return datetime.now()
+
+
+# In your main app.py file
+
+# --- Make sure you have these imports at the top of your file ---
+
+from urllib.parse import unquote # <-- ADD THIS IMPORT
+
+# ... other imports ...
+
+# NEW ENDPOINT: /auth/telegram
+@app.post('/auth/telegram')
+def auth_with_telegram():
+    data = request.get_json()
+    init_data_str = data.get('initData')
+
+    if not init_data_str:
+        return jsonify({"error": "initData is required"}), 400
+
+    # !!! CRITICAL SECURITY STEP: You MUST validate the hash here !!!
+    # (Your validation logic would go here)
+
+    # Step 1: Parse the initData string into a dictionary
+    params = dict(p.split('=') for p in init_data_str.split('&'))
+
+    # Step 2: Get the raw, URL-encoded user string
+    user_param_encoded = params.get('user')
+    if not user_param_encoded:
+        return jsonify({"error": "User data is missing from initData"}), 400
+
+    # Step 3: **THIS IS THE FIX** - Decode the URL-encoded string
+    user_param_decoded = unquote(user_param_encoded)
+
+    # Step 4: Now, safely parse the decoded string as JSON
+    try:
+        user_data = json.loads(user_param_decoded)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Failed to decode user JSON"}), 400
+    
+    telegram_id = user_data.get('id')
+    if not telegram_id:
+        return jsonify({"error": "Invalid user data in initData"}), 400
+
+    # Find or create the user
+    user = User.query.filter_by(telegram_id=telegram_id).first()
+    if not user:
+        user = User(
+            telegram_id=telegram_id,
+            username=user_data.get('username'),
+            first_name=user_data.get('first_name'),
+            last_name=user_data.get('last_name'),
+            language=user_data.get('language_code'),
+            # Ensure new users get default values for your app's fields
+            coins=0,
+            spins=10,
+            ton=0.0
+        )
+        db.session.add(user)
+    
+    # Always update last_login for returning users
+    user.last_login = datetime.now()
+    db.session.commit()
+
+    # Store the user's ID in the session to log them in
+    session['user_id'] = user.id
+
+    # Return the user's data
+    return jsonify(user.to_dict())
+
+
+# In your Flask app.py file
+
+@app.post('/dev/login/<int:user_id>')
+def dev_login(user_id):
+    """
+    Establishes a session for a specific user for development purposes.
+    This function is the necessary first step before `current_user()` will work.
+    """
+    # Security check to prevent this from running in production.
+    if  app.debug:
+        return jsonify({"message": "This endpoint is for development only"}), 403
+
+    # Step 1: Query the database for the user.
+    user = User.query.get(user_id)
+
+    # Step 2: **CRITICAL CHECK** - Handle the case where the user does not exist.
+    if not user:
+        # If no user is found, stop immediately and send a clear error message.
+        # This prevents the `AttributeError` and ensures no invalid session is created.
+        app.logger.error(f"DEV LOGIN FAILED: No user found with ID: {user_id}")
+        return jsonify({"message": f"User with ID {user_id} not found."}), 404
+
+    # Step 3: If the user was found, ESTABLISH the session.
+    # This is the action that makes `current_user()` work on the next request.
+    session.clear()
+    session['user_id'] = user.id
+    
+    app.logger.info(f"DEV LOGIN SUCCESS: Session created for User ID {user.id} ({user.username})")
+
+    # Step 4: Return the user's data to the frontend. This call is now safe.
+    return jsonify(user.to_dict())
+
+
+
+
+# NEW ENDPOINT for the updated fetchUser
+@app.get('/user/me')
+def get_current_user():
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    return jsonify(user.to_dict()) # Return the logged-in user's data
+
+
+
+
+
+
+
+
 # ----------------------------
 # User-facing app
 # ----------------------------
@@ -600,6 +768,10 @@ def fetch_user():
         "createdAt": u.created_at.isoformat() if u.created_at else None,
         "lastLogin": u.last_login.isoformat() if u.last_login else None,
     })
+
+
+
+
 
 @app.get('/daily-tasks')
 def fetch_daily_tasks():
@@ -630,10 +802,46 @@ def fetch_game_tasks():
         })
     return jsonify(out)
 
+
+
+
+ICONS = {
+    'Game': '🎮',
+    'Social': '📣',
+    'Partner': '🎁',
+}
+
 @app.get('/quests')
-def fetch_quests():
-    # You don't have Quest in the pasted schema; return empty stub
-    return jsonify([])
+def get_all_user_campaigns_and_partner_tasks():
+    quests = []
+
+    # --- Partner Tasks ---
+    partner_tasks = PartnerTask.query.filter_by(active=True).all()
+    for pt in partner_tasks:
+        quests.append({
+            'id': f'q_partner_{pt.id}',
+            'icon': ICONS["Partner"],
+            'title': pt.title,
+            'reward': pt.reward,
+            'currentProgress': 0,
+            'totalProgress': pt.required_level
+        })
+
+    # --- User Campaigns ---
+    user_campaigns = UserCampaign.query.order_by(UserCampaign.created_at.desc()).all()
+    for uc in user_campaigns:
+        quests.append({
+            'id': f'q_campaign_{uc.id}',
+            'icon': ICONS["Social"],  # Example: use campaign type as icon name
+            'title': f"{uc.campaign_type}",
+            'reward': int(uc.cost or 0),  # If cost represents payout
+            'currentProgress': uc.progress or 0,
+            'totalProgress': uc.goal or 1
+        })
+
+    return jsonify(quests)
+
+
 
 @app.get('/transactions')
 def fetch_transactions():
@@ -661,15 +869,36 @@ def fetch_friends():
 @app.get('/user-campaigns')
 def fetch_user_campaigns():
     u = current_user()
+    #u = User.query.get(2)
+    
     cs = UserCampaign.query.filter_by(user_id=u.id).order_by(UserCampaign.created_at.desc()).all()
     return jsonify([user_campaign_to_dict(c) for c in cs])
+
+
+
 
 @app.get('/partner-campaigns')
 def fetch_partner_campaigns():
     # Show the whole catalog of partner tasks + user's progress
     u = current_user()
-    pts = PartnerTask.query.order_by(PartnerTask.created_at.desc()).all()
-    return jsonify([partner_task_to_dict(p, u) for p in pts])
+    user_campaigns = UserCampaign.query.filter_by(user_id=u.id, campaign_type='Partner').all()
+
+    def serialize_campaign(c: UserCampaign):
+        partner_task = PartnerTask.query.filter_by(link=c.link).first()
+        return {
+            "id": c.id,
+            "link": c.link,
+            "goal": c.goal,
+            "cost": c.cost,
+            "completions": c.progress,
+            "status": c.status,
+            "requiredLevel": partner_task.required_level if partner_task else 1  # ✅ fix
+        }
+
+    return jsonify([serialize_campaign(c) for c in user_campaigns])
+
+
+
 
 @app.post('/user-campaigns')
 def add_user_campaign():
@@ -680,6 +909,9 @@ def add_user_campaign():
 
 
     u = current_user()
+
+    app.logger.error(f" FAILED: No user found with ID: {u}")
+
     data = request.get_json(force=True) or {}
 
     # # Get user from request body (for Postman) or from current_user()
@@ -694,10 +926,21 @@ def add_user_campaign():
     #         return jsonify({"success": False, "message": "Authentication required"}), 401
 
 
-    link = data.get('link')
+    link = data.get('link', '')
+
+    category = "Social"  # default
+    
+    if "t.me" in link:
+        parsed = urlparse(link)
+        path = parsed.path.strip("/")  # e.g. "EmpiresBattleBot"
+        
+        if path.lower().endswith("bot"):
+            category = "Game"
+        else:
+            category = "Social"
+
     goal = int(data.get('goal') or 1)
     cost = float(data.get('cost') or 0.0)
-    category = data.get('category', 'Social')  # default Social to mirror the mock
 
     if (u.ad_credit or 0.0) < cost:
         return jsonify({"success": False, "message": "Insufficient ad balance. Please add funds."}), 400
@@ -723,6 +966,9 @@ def add_user_campaign():
         "user": {"id": u.id, "adCredit": u.ad_credit, "coins": u.coins, "spins": u.spins}
     })
 
+
+
+
 @app.post('/partner-tasks')
 def add_partner_task():
     """
@@ -730,6 +976,10 @@ def add_partner_task():
     Deduct adCredit, create PartnerTask (catalog) + a UserCampaign(row) with campaign_type='Partner' for tracking cost/goal/progress.
     """
     u = current_user()
+    # u=User.query.get(2)
+    # created_by_user_id=u.id
+
+
     data = request.get_json(force=True) or {}
     link = data.get('link')
     goal = int(data.get('goal') or 1)
@@ -750,7 +1000,9 @@ def add_partner_task():
         icon_name=None,
         link=link,
         active=True,
-        required_level=level
+        required_level=level,
+        created_by_user_id=u.id  # ✅ This is the fix
+
     )
     db.session.add(pt)
     db.session.flush()  # get pt.id
@@ -1044,6 +1296,8 @@ def admin_login():
         return jsonify({"success": True, "token": f"mock_token_{admin.id}"})
     return jsonify({"success": False}), 401
 
+
+
 @app.get('/admin/dashboard-stats')
 def fetch_dashboard_stats():
     admin = require_admin()
@@ -1063,14 +1317,22 @@ def fetch_dashboard_stats():
 @app.get('/admin/users')
 def fetch_all_users():
     admin = require_admin()
-    if not admin:
-        return jsonify({"error": "Unauthorized"}), 401
+    # if not admin:
+    #     return jsonify({"error": "Unauthorized"}), 401
+
     users = User.query.order_by(User.id.desc()).all()
-    return jsonify([{
-        "id": u.id, "telegramId": u.telegram_id, "username": u.username,
-        "coins": u.coins, "ton": u.ton, "spins": u.spins, "adCredit": u.ad_credit,
-        "createdAt": u.created_at.isoformat() if u.created_at else None
-    } for u in users])
+    
+    return jsonify([
+        {
+            "id": u.id,
+            "name": u.username or f"{u.first_name or ''} {u.last_name or ''}".strip() or "Unknown",
+            "coins": u.coins,
+            "spins": u.spins,
+            "adCredit": u.ad_credit,
+            "banned": u.banned
+        }
+        for u in users
+    ])
 
 @app.patch('/admin/users/<int:user_id>')
 def update_user(user_id: int):

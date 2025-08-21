@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { COMPLETION_TIERS, LANGUAGE_OPTIONS } from '../constants';
 import type { CompletionTier, LanguageOption, UserCampaign, User } from '../types';
+
 import { fetchUserCampaigns, addUserCampaign, depositAdCredit } from '../services/api';
 import ProgressBar from '../components/ProgressBar';
 import { useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
@@ -9,19 +10,45 @@ import { useTonWallet, useTonConnectUI } from '@tonconnect/ui-react';
 const MyTasksComponent: React.FC = () => {
   const [campaigns, setCampaigns] = useState<UserCampaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchUserCampaigns().then(data => {
-      setCampaigns(data);
-      setLoading(false);
-    });
+    const loadCampaigns = async () => {
+      try {
+        const data = await fetchUserCampaigns();
+
+        // ✅ Ensure it's always an array
+        if (Array.isArray(data)) {
+          setCampaigns(data);
+        } else {
+          setCampaigns([]); // fallback
+        }
+      } catch (err) {
+        console.error("Failed to fetch campaigns:", err);
+        setError("Could not load your campaigns. Please try again later.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCampaigns();
   }, []);
 
   if (loading) {
     return <div className="text-center text-slate-400 py-10">Loading campaigns...</div>;
   }
-  
-  const statusStyles = {
+
+  if (error) {
+    return <div className="text-center text-red-400 py-10">{error}</div>;
+  }
+
+  if (campaigns.length === 0) {
+    return <p className="text-center text-slate-400 py-10">
+      You haven't created any tasks yet.
+    </p>;
+  }
+
+  const statusStyles: Record<string, string> = {
     Active: 'bg-green-500/20 text-green-400',
     Paused: 'bg-yellow-500/20 text-yellow-400',
     Completed: 'bg-slate-500/20 text-slate-400',
@@ -29,32 +56,40 @@ const MyTasksComponent: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {campaigns.length === 0 ? (
-        <p className="text-center text-slate-400 py-10">You haven't created any tasks yet.</p>
-      ) : (
-        campaigns.map(campaign => (
-          <div key={campaign.id} className="bg-slate-800 p-4 rounded-lg space-y-3">
-            <div className="flex justify-between items-start">
-              <p className="text-white font-semibold truncate pr-4">{campaign.link}</p>
-              <span className={`px-2 py-1 text-xs font-bold rounded-full ${statusStyles[campaign.status]}`}>{campaign.status}</span>
-            </div>
-            <div>
-              <ProgressBar current={campaign.completions} total={campaign.goal} />
-              <div className="flex justify-between text-sm text-slate-400 mt-1">
-                <span>{campaign.completions.toLocaleString()} / {campaign.goal.toLocaleString()}</span>
-                <span>Spent: {campaign.cost.toFixed(2)} TON</span>
-              </div>
-            </div>
-            <div className="flex space-x-2 pt-2">
-              <button className="w-full bg-slate-700 text-white font-semibold py-2 rounded-lg text-sm hover:bg-slate-600 transition-colors">Add Funds</button>
-              <button disabled={campaign.status !== 'Completed'} className="w-full bg-green-500 text-white font-semibold py-2 rounded-lg text-sm hover:bg-green-600 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed">Re-activate</button>
+      {campaigns.map(campaign => (
+        <div key={campaign.id} className="bg-slate-800 p-4 rounded-lg space-y-3">
+          <div className="flex justify-between items-start">
+            <p className="text-white font-semibold truncate pr-4">{campaign.link}</p>
+            <span className={`px-2 py-1 text-xs font-bold rounded-full ${statusStyles[campaign.status] || ''}`}>
+              {campaign.status}
+            </span>
+          </div>
+          <div>
+            <ProgressBar current={campaign.completions} total={campaign.goal} />
+            <div className="flex justify-between text-sm text-slate-400 mt-1">
+              <span>{campaign.completions?.toLocaleString()} / {campaign.goal?.toLocaleString()}</span>
+              <span>Spent: {campaign.cost?.toFixed(2)} TON</span>
             </div>
           </div>
-        ))
-      )}
+          <div className="flex space-x-2 pt-2">
+            <button className="w-full bg-slate-700 text-white font-semibold py-2 rounded-lg text-sm hover:bg-slate-600 transition-colors">
+              Add Funds
+            </button>
+            <button
+              disabled={campaign.status !== 'Completed'}
+              className="w-full bg-green-500 text-white font-semibold py-2 rounded-lg text-sm hover:bg-green-600 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+            >
+              Re-activate
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 };
+
+
+
 
 const AdBalanceDisplay: React.FC<{
     user: User | null;
@@ -166,6 +201,7 @@ interface NewTaskPageProps {
 }
 
 const NewTaskPage: React.FC<NewTaskPageProps> = ({ user, setUser }) => {
+  
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'add' | 'my'>('add');
   const wallet = useTonWallet();
