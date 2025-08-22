@@ -880,8 +880,8 @@ def fetch_user_campaigns():
 @app.get('/partner-campaigns')
 def fetch_partner_campaigns():
     # Show the whole catalog of partner tasks + user's progress
-    u = current_user()
-    user_campaigns = UserCampaign.query.filter_by(user_id=u.id, campaign_type='Partner').all()
+    # u = current_user()
+    user_campaigns = UserCampaign.query.filter_by(campaign_type='Partner').all()
 
     def serialize_campaign(c: UserCampaign):
         partner_task = PartnerTask.query.filter_by(link=c.link).first()
